@@ -36,95 +36,19 @@
       </div>
     </header>
 
-    <div class="row g-4 align-items-start">
-      <section class="col-xl-8">
-        <div class="board-frame">
-          <div class="board-grid">
-            <article
-              v-for="(space, index) in board"
-              :key="space.id"
-              class="board-tile"
-              :class="[
-                tilePlacementClasses[index],
-                `tile-${space.type}`,
-                {
-                  'is-active-space': currentPlayer && currentPlayer.position === index && !winner,
-                  'is-owned-space': !!space.ownerId,
-                  'is-upgraded-space': isProperty(space) && space.level > 0,
-                }
-              ]"
-              :style="{ '--tile-accent': space.accent || '#d9d9d9' }"
-            >
-              <div class="tile-ribbon"></div>
-              <div class="tile-header">
-                <span class="tile-kind">{{ tileTypeLabel(space.type) }}</span>
-                <div class="tile-badges">
-                  <span v-if="isProperty(space)" class="level-chip">{{ propertyLevelBadge(space) }}</span>
-                  <span v-if="ownerFor(space)" class="owner-chip">{{ ownerFor(space).name }}</span>
-                </div>
-              </div>
-              <h2 class="tile-name">{{ space.name }}</h2>
-              <p v-if="space.type === 'property'" class="tile-meta">
-                {{ space.district }} / 租金 {{ formatCurrency(currentRent(space)) }}
-              </p>
-              <p v-if="space.type === 'property'" class="tile-meta">
-                售價 {{ formatCurrency(space.price) }}
-                <span v-if="!isPropertyMaxed(space)"> / 下級 {{ formatCurrency(nextUpgradeCost(space)) }}</span>
-                <span v-else> / 已滿級</span>
-              </p>
-              <p v-else-if="space.type === 'tax'" class="tile-meta">
-                支付 {{ formatCurrency(space.amount) }}
-              </p>
-              <p v-else class="tile-meta">{{ space.description }}</p>
-              <div v-if="playersOnSpace(index).length" class="tile-tokens">
-                <span
-                  v-for="player in playersOnSpace(index)"
-                  :key="player.id"
-                  class="player-token"
-                  :style="{ '--token-color': player.color }"
-                  :title="player.name"
-                >
-                  {{ player.shortName }}
-                </span>
-              </div>
-            </article>
-
-            <div class="board-center">
-              <p class="eyebrow mb-2">Board Control</p>
-              <h2 class="mb-3">{{ boardHeadline }}</h2>
-              <p class="board-center-copy mb-4">{{ boardSubline }}</p>
-
-              <div class="center-stat-grid">
-                <div class="center-stat-card">
-                  <span>起點薪資</span>
-                  <strong>{{ formatCurrency(startReward) }}</strong>
-                </div>
-                <div class="center-stat-card">
-                  <span>開局資金</span>
-                  <strong>{{ formatCurrency(startingBalance) }}</strong>
-                </div>
-                <div class="center-stat-card">
-                  <span>場上玩家</span>
-                  <strong>{{ activePlayers.length }}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
+    <section class="hud-card session-banner mb-4 mb-xl-5">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow mb-2">Session Setup</p>
+          <h2 class="h4 mb-1">建立遊戲</h2>
         </div>
-      </section>
+        <span class="status-pill">{{ gameStarted ? '遊戲進行中' : '等待開始' }}</span>
+      </div>
 
-      <aside class="col-xl-4">
-        <div class="hud-stack">
-          <section class="hud-card">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow mb-2">Session Setup</p>
-                <h2 class="h4 mb-1">建立遊戲</h2>
-              </div>
-              <span class="status-pill">{{ gameStarted ? '遊戲進行中' : '等待開始' }}</span>
-            </div>
-
-            <form @submit.prevent="startGame" class="setup-form mt-4">
+      <form @submit.prevent="startGame" class="setup-form setup-form-banner mt-4">
+        <div class="row g-4 align-items-start">
+          <div class="col-xl-3 col-lg-4">
+            <div class="session-banner-block">
               <div class="mb-3">
                 <label for="playerCount" class="form-label">玩家人數</label>
                 <select id="playerCount" v-model.number="playerCount" class="form-select">
@@ -134,8 +58,25 @@
                 </select>
               </div>
 
+              <div v-if="formError" class="alert alert-danger mt-3 mb-0" role="alert">
+                {{ formError }}
+              </div>
+
+              <div class="d-flex gap-2 mt-4 flex-wrap">
+                <button type="submit" class="btn btn-ember">
+                  {{ gameStarted ? '依目前設定重新開局' : '開始遊戲' }}
+                </button>
+                <button v-if="gameStarted" type="button" class="btn btn-outline-dark" @click="resetGame" :disabled="isAnimatingMovement">
+                  結束本局
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-xl-5 col-lg-8">
+            <div class="session-banner-block">
               <div class="row g-3">
-                <div v-for="slot in playerCount" :key="slot" class="col-12">
+                <div v-for="slot in playerCount" :key="slot" class="col-md-6">
                   <label :for="`player-${slot}`" class="form-label">玩家 {{ slot }} 名稱</label>
                   <input
                     :id="`player-${slot}`"
@@ -147,31 +88,22 @@
                   >
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div v-if="formError" class="alert alert-danger mt-3 mb-0" role="alert">
-                {{ formError }}
-              </div>
-
-              <div class="d-flex gap-2 mt-4 flex-wrap">
-                <button type="submit" class="btn btn-ember">
-                  {{ gameStarted ? '依目前設定重新開局' : '開始遊戲' }}
-                </button>
-                <button v-if="gameStarted" type="button" class="btn btn-outline-dark" @click="resetGame">
-                  結束本局
-                </button>
-              </div>
-
-              <div class="save-tools mt-4">
+          <div class="col-xl-4">
+            <div class="session-banner-block">
+              <div class="save-tools session-save-tools">
                 <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
                   <strong>進度管理</strong>
                   <span class="mini-pill" v-if="hasAutoSave">最近暫存 {{ autoSaveMeta.savedAtText }}</span>
                 </div>
 
                 <div class="d-flex gap-2 mt-3 flex-wrap">
-                  <button type="button" class="btn btn-outline-dark" @click="exportSaveFile" :disabled="!gameStarted">匯出 JSON</button>
-                  <button type="button" class="btn btn-outline-dark" @click="triggerImportPicker">匯入 JSON</button>
-                  <button type="button" class="btn btn-outline-dark" @click="prepareAutoSaveImport" :disabled="!hasAutoSave">載入自動暫存</button>
-                  <button type="button" class="btn btn-outline-dark" @click="clearAutoSave" :disabled="!hasAutoSave">清除暫存</button>
+                  <button type="button" class="btn btn-outline-dark" @click="exportSaveFile" :disabled="!gameStarted || isAnimatingMovement">匯出 JSON</button>
+                  <button type="button" class="btn btn-outline-dark" @click="triggerImportPicker" :disabled="isAnimatingMovement">匯入 JSON</button>
+                  <button type="button" class="btn btn-outline-dark" @click="prepareAutoSaveImport" :disabled="!hasAutoSave || isAnimatingMovement">載入自動暫存</button>
+                  <button type="button" class="btn btn-outline-dark" @click="clearAutoSave" :disabled="!hasAutoSave || isAnimatingMovement">清除暫存</button>
                 </div>
 
                 <input id="saveFileInput" name="saveFileInput" ref="saveFileInput" class="d-none" type="file" accept=".json,application/json" aria-label="選擇 JSON 存檔" @change="handleImportFileChange">
@@ -202,10 +134,99 @@
                   {{ saveFeedback.text }}
                 </div>
               </div>
-            </form>
-          </section>
+            </div>
+          </div>
+        </div>
+      </form>
+    </section>
 
-          <section class="hud-card" v-if="gameStarted">
+    <div class="row g-4 align-items-start main-board-layout">
+      <section :class="gameStarted ? 'col-xl-8' : 'col-12'">
+        <div class="board-frame">
+          <div class="board-grid">
+            <article
+              v-for="(space, index) in board"
+              :key="space.id"
+              class="board-tile"
+              :data-owner-avatar="ownerFor(space) ? playerAvatar(ownerFor(space)) : ''"
+              :data-owner-seat="ownerSeatIndex(space)"
+              :class="[
+                tilePlacementClasses[index],
+                `tile-${space.type}`,
+                {
+                  'is-active-space': currentPlayer && currentPlayer.position === index && !winner,
+                  'is-traveling-space': isMovingPlayerOnSpace(index),
+                  'is-owned-space': !!space.ownerId,
+                  'is-upgraded-space': isProperty(space) && space.level > 0,
+                }
+              ]"
+              :style="tileVisualStyle(space)"
+            >
+              <div class="tile-ribbon"></div>
+              <div class="tile-header">
+                <span class="tile-kind">{{ tileTypeLabel(space.type) }}</span>
+                <div class="tile-badges">
+                  <span v-if="isProperty(space)" class="level-chip">{{ propertyLevelBadge(space) }}</span>
+                  <span v-if="ownerFor(space)" class="owner-chip">
+                    <span class="owner-chip-avatar">{{ playerAvatar(ownerFor(space)) }}</span>
+                    <span>{{ ownerFor(space).name }}</span>
+                  </span>
+                </div>
+              </div>
+              <h2 class="tile-name">{{ space.name }}</h2>
+              <p v-if="space.type === 'property'" class="tile-meta">
+                {{ space.district }} / 租金 {{ formatCurrency(currentRent(space)) }}
+              </p>
+              <p v-if="space.type === 'property'" class="tile-meta">
+                售價 {{ formatCurrency(space.price) }}
+                <span v-if="!isPropertyMaxed(space)"> / 下級 {{ formatCurrency(nextUpgradeCost(space)) }}</span>
+                <span v-else> / 已滿級</span>
+              </p>
+              <p v-else-if="space.type === 'tax'" class="tile-meta">
+                支付 {{ formatCurrency(space.amount) }}
+              </p>
+              <p v-else class="tile-meta">{{ space.description }}</p>
+              <div v-if="playersOnSpace(index).length" class="tile-tokens">
+                <span
+                  v-for="player in playersOnSpace(index)"
+                  :key="player.id"
+                  class="player-token"
+                  :class="{ 'is-moving': isMovingPlayer(player.id) }"
+                  :style="{ '--token-color': player.color }"
+                  :title="player.name"
+                >
+                  {{ playerAvatar(player) }}
+                </span>
+              </div>
+            </article>
+
+            <div class="board-center">
+              <p class="eyebrow mb-2">Board Control</p>
+              <h2 class="mb-3">{{ boardHeadline }}</h2>
+              <p class="board-center-copy mb-4">{{ boardSubline }}</p>
+
+              <div class="center-stat-grid">
+                <div class="center-stat-card">
+                  <span>起點薪資</span>
+                  <strong>{{ formatCurrency(startReward) }}</strong>
+                </div>
+                <div class="center-stat-card">
+                  <span>開局資金</span>
+                  <strong>{{ formatCurrency(startingBalance) }}</strong>
+                </div>
+                <div class="center-stat-card">
+                  <span>場上玩家</span>
+                  <strong>{{ activePlayers.length }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="col-xl-4" v-if="gameStarted">
+        <div class="hud-stack hud-stack-side">
+          <section class="hud-card current-turn-card">
             <div class="section-heading">
               <div>
                 <p class="eyebrow mb-2">Current Turn</p>
@@ -218,7 +239,9 @@
 
             <div class="current-player-panel mt-4">
               <div class="current-player-header">
-                <span class="player-dot" :style="{ '--token-color': winner ? winner.color : currentPlayer.color }"></span>
+                <span class="player-avatar-large" :style="{ '--token-color': winner ? winner.color : currentPlayer.color }">
+                  {{ playerAvatar(winner || currentPlayer) }}
+                </span>
                 <div>
                   <strong>{{ winner ? winner.name : currentPlayer.name }}</strong>
                   <p class="mb-0 text-secondary">
@@ -231,10 +254,11 @@
                 <span class="roll-chip">骰子 A {{ currentRoll.diceA }}</span>
                 <span class="roll-chip">骰子 B {{ currentRoll.diceB }}</span>
                 <span class="roll-chip roll-chip-strong">合計 {{ currentRoll.total }}</span>
+                <span v-if="isAnimatingMovement" class="roll-chip roll-chip-moving">{{ playerAvatar(currentPlayer) }} 正在移動中</span>
               </div>
 
               <div class="action-grid mt-4">
-                <button class="btn btn-ember" @click="rollDice" :disabled="!canRoll">擲骰子</button>
+                <button class="btn btn-ember" @click="rollDice" :disabled="!canRoll">{{ isAnimatingMovement ? '移動中...' : '擲骰子' }}</button>
                 <button class="btn btn-outline-dark" @click="buyCurrentProperty" :disabled="!canBuyCurrentProperty">購買地產</button>
                 <button class="btn btn-outline-dark" @click="skipPurchase" :disabled="!canSkipPurchase">略過購買</button>
                 <button class="btn btn-night" @click="endTurn" :disabled="!canEndTurn">結束回合</button>
@@ -281,8 +305,14 @@
               </div>
             </div>
           </section>
+        </div>
+      </aside>
+    </div>
 
-          <section class="hud-card" v-if="gameStarted">
+    <div class="row g-4 align-items-start mt-1">
+      <section class="col-xl-4" v-if="gameStarted">
+        <div class="hud-stack">
+          <section class="hud-card">
             <div class="section-heading">
               <div>
                 <p class="eyebrow mb-2">Chance Deck</p>
@@ -306,7 +336,11 @@
               </template>
             </div>
           </section>
+        </div>
+      </section>
 
+      <section :class="gameStarted ? 'col-xl-4' : 'col-xl-5'">
+        <div class="hud-stack">
           <section class="hud-card">
             <div class="section-heading">
               <div>
@@ -327,7 +361,7 @@
                 }"
               >
                 <div class="player-row-main">
-                  <span class="player-dot" :style="{ '--token-color': player.color }"></span>
+                  <span class="player-avatar-inline" :style="{ '--token-color': player.color }">{{ playerAvatar(player) }}</span>
                   <div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                       <strong>{{ player.name }}</strong>
@@ -343,7 +377,11 @@
               </article>
             </div>
           </section>
+        </div>
+      </section>
 
+      <section :class="gameStarted ? 'col-xl-4' : 'col-xl-7'">
+        <div class="hud-stack">
           <section class="hud-card">
             <div class="section-heading">
               <div>
@@ -360,7 +398,7 @@
             </ol>
           </section>
         </div>
-      </aside>
+      </section>
     </div>
   </div>
 

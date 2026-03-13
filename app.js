@@ -6,8 +6,11 @@ const SAVE_SCHEMA_VERSION = 1;
 const AUTO_SAVE_KEY = "richweb.monopoly-lite.auto-save";
 const MAX_LOG_ENTRIES = 18;
 const PLAYER_COLORS = ["#d95f39", "#2a9d8f", "#355070", "#ffb703"];
+const PLAYER_AVATARS = ["🦊", "🐼", "🐳", "🦉"];
 const TILE_POSITIONS = Array.from({ length: 16 }, (_, index) => `tile-pos-${index}`);
 const formatter = new Intl.NumberFormat("zh-TW");
+const MOVEMENT_STEP_DELAY = 190;
+const MOVEMENT_SETTLE_DELAY = 120;
 
 const CHANCE_CARDS = [
   {
@@ -130,6 +133,26 @@ function formatCurrency(amount) {
   return `$${formatter.format(amount)}`;
 }
 
+function colorWithAlpha(hexColor, alpha) {
+  if (typeof hexColor !== "string") {
+    return `rgba(18, 50, 74, ${alpha})`;
+  }
+
+  const normalized = hexColor.replace("#", "").trim();
+  const expanded = normalized.length === 3
+    ? normalized.split("").map((part) => `${part}${part}`).join("")
+    : normalized;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
+    return `rgba(18, 50, 74, ${alpha})`;
+  }
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
 function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -221,6 +244,10 @@ function randomDie() {
   return Math.floor(Math.random() * 6) + 1;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function defaultNames() {
   return ["曜石", "流星", "遠洋", "赤霞"];
 }
@@ -230,6 +257,15 @@ function createChanceDeck() {
     ...card,
     payload: { ...card.payload },
   })));
+}
+
+function decoratePlayer(player, index = 0) {
+  return {
+    ...player,
+    shortName: player.shortName || player.name?.slice(0, 1) || "?",
+    color: player.color || PLAYER_COLORS[index % PLAYER_COLORS.length],
+    avatar: player.avatar || PLAYER_AVATARS[index % PLAYER_AVATARS.length],
+  };
 }
 
 function validateSaveCard(card) {
@@ -367,6 +403,8 @@ createApp({
       lastDrawnCard: null,
       autoSaveMeta: null,
       pendingImport: null,
+      isAnimatingMovement: false,
+      movingPlayerId: null,
       saveFeedback: {
         text: "",
         tone: "secondary",
@@ -419,10 +457,11 @@ createApp({
       return Boolean(this.autoSaveMeta);
     },
     canRoll() {
-      return Boolean(this.gameStarted && !this.winner && this.currentPlayer && !this.currentPlayer.bankrupt && !this.currentRoll && !this.pendingAction);
+      return Boolean(this.gameStarted && !this.winner && !this.isAnimatingMovement && this.currentPlayer && !this.currentPlayer.bankrupt && !this.currentRoll && !this.pendingAction);
     },
     canBuyCurrentProperty() {
       return Boolean(
+        !this.isAnimatingMovement &&
         this.pendingAction &&
         this.pendingAction.type === "buy" &&
         this.currentPlayer &&
@@ -433,7 +472,7 @@ createApp({
       return this.canBuyCurrentProperty;
     },
     canEndTurn() {
-      return Boolean(this.gameStarted && !this.winner && this.currentPlayer && this.currentRoll && !this.pendingAction);
+      return Boolean(this.gameStarted && !this.winner && !this.isAnimatingMovement && this.currentPlayer && this.currentRoll && !this.pendingAction);
     },
     playerStandings() {
       return [...this.players].sort((left, right) => {
@@ -451,6 +490,10 @@ createApp({
 
       if (!this.gameStarted) {
         return "設定玩家，準備開局";
+      }
+
+      if (this.isAnimatingMovement) {
+        return `${this.currentPlayer.name} 正在前進中`;
       }
 
       if (this.pendingAction) {
@@ -476,6 +519,10 @@ createApp({
         return "這個版本支援 2 到 4 名玩家本機輪流操作，包含買地、收租、稅金與隨機事件。";
       }
 
+      if (this.isAnimatingMovement) {
+        return `${this.playerAvatar(this.currentPlayer)} ${this.currentPlayer.name} 正在逐格移動，目的地效果會在停下後自動結算。`;
+      }
+
       if (this.pendingAction) {
         return `當前地產尚未決定是否購入。若略過購買，回合仍可正常結束。`;
       }
@@ -499,6 +546,35 @@ createApp({
     formatDateTime,
     isProperty(space) {
       return Boolean(space && space.type === "property");
+    },
+    playerAvatar(player) {
+      return player?.avatar || player?.shortName || "🙂";
+    },
+    ownerSeatIndex(space) {
+      const owner = this.ownerFor(space);
+      if (!owner) {
+        return "";
+      }
+
+      const seatIndex = this.players.findIndex((player) => player.id === owner.id);
+      return seatIndex >= 0 ? String(seatIndex) : "";
+    },
+    tileVisualStyle(space) {
+      const owner = this.ownerFor(space);
+
+      return {
+        "--tile-accent": space.accent || "#d9d9d9",
+        "--tile-owner-color": owner?.color || "rgba(18, 50, 74, 0.12)",
+        "--tile-owner-soft": owner ? colorWithAlpha(owner.color, 0.24) : "rgba(18, 50, 74, 0.06)",
+        "--tile-owner-glow": owner ? colorWithAlpha(owner.color, 0.22) : "rgba(18, 50, 74, 0.08)",
+        "--tile-owner-border": owner ? colorWithAlpha(owner.color, 0.48) : "rgba(18, 50, 74, 0.12)",
+      };
+    },
+    isMovingPlayer(playerId) {
+      return Boolean(this.isAnimatingMovement && this.movingPlayerId === playerId);
+    },
+    isMovingPlayerOnSpace(index) {
+      return this.playersOnSpace(index).some((player) => this.isMovingPlayer(player.id));
     },
     tileTypeLabel(type) {
       const labels = {
@@ -720,7 +796,7 @@ createApp({
       this.startingBalance = snapshot.settings.startingBalance;
       this.startReward = snapshot.settings.startReward;
       this.board = snapshot.game.board;
-      this.players = snapshot.game.players;
+      this.players = snapshot.game.players.map((player, index) => decoratePlayer(player, index));
       this.currentPlayerIndex = snapshot.game.currentPlayerIndex;
       this.currentRoll = snapshot.game.currentRoll;
       this.pendingAction = snapshot.game.pendingAction;
@@ -732,6 +808,8 @@ createApp({
       this.formError = "";
       this.logEntries = snapshot.game.logEntries;
       this.pendingImport = null;
+      this.isAnimatingMovement = false;
+      this.movingPlayerId = null;
 
       this.logEvent(`已從${sourceLabel}${fileName ? `「${fileName}」` : ""}載入遊戲進度，並同步更新自動暫存。`, "success");
       this.persistAutoSave();
@@ -899,7 +977,7 @@ createApp({
       );
     },
     isUpgradeAvailable(space) {
-      return Boolean(this.gameStarted && !this.winner && this.canUpgradePropertyForPlayer(space, this.currentPlayer));
+      return Boolean(this.gameStarted && !this.winner && !this.isAnimatingMovement && this.canUpgradePropertyForPlayer(space, this.currentPlayer));
     },
     upgradeablePropertyCount(playerId) {
       const player = this.players.find((item) => item.id === playerId);
@@ -948,7 +1026,7 @@ createApp({
       this.logEntries = this.logEntries.slice(0, MAX_LOG_ENTRIES);
     },
     buildPlayers(names) {
-      return names.map((name, index) => ({
+      return names.map((name, index) => decoratePlayer({
         id: `player-${index + 1}`,
         name,
         shortName: name.slice(0, 1),
@@ -956,7 +1034,37 @@ createApp({
         position: 0,
         bankrupt: false,
         color: PLAYER_COLORS[index],
-      }));
+        avatar: PLAYER_AVATARS[index],
+      }, index));
+    },
+    async animatePlayerMovement(player, steps, reason = "移動") {
+      if (!player || steps === 0) {
+        return this.currentSpace;
+      }
+
+      const direction = steps >= 0 ? 1 : -1;
+      const totalSteps = Math.abs(steps);
+
+      this.isAnimatingMovement = true;
+      this.movingPlayerId = player.id;
+
+      try {
+        for (let step = 0; step < totalSteps; step += 1) {
+          await sleep(MOVEMENT_STEP_DELAY);
+
+          if (direction > 0 && player.position === this.board.length - 1) {
+            this.rewardForPassingStart(player, reason);
+          }
+
+          player.position = ((player.position + direction) % this.board.length + this.board.length) % this.board.length;
+        }
+
+        await sleep(MOVEMENT_SETTLE_DELAY);
+        return this.currentSpace;
+      } finally {
+        this.isAnimatingMovement = false;
+        this.movingPlayerId = null;
+      }
     },
     startGame() {
       const names = this.setupNames.slice(0, this.playerCount).map((name) => name.trim());
@@ -1001,7 +1109,7 @@ createApp({
       this.clearAutoSave({ silent: true });
       this.setSaveFeedback("本局已結束，瀏覽器中的自動暫存也已清除。", "secondary");
     },
-    rollDice() {
+    async rollDice() {
       if (!this.canRoll) {
         return;
       }
@@ -1012,8 +1120,8 @@ createApp({
       const player = this.currentPlayer;
       this.currentRoll = { diceA, diceB, total };
 
-      this.movePlayerBySteps(player, total, "擲骰移動");
-      this.logEvent(`${player.name} 擲出 ${diceA} 與 ${diceB}，抵達 ${this.currentSpace.name}。`, "turn");
+      const destination = await this.animatePlayerMovement(player, total, "擲骰移動");
+      this.logEvent(`${player.name} ${this.playerAvatar(player)} 擲出 ${diceA} 與 ${diceB}，抵達 ${destination.name}。`, "turn");
       this.resolveCurrentSpace();
       this.persistAutoSave();
     },
