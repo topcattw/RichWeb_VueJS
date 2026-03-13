@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>富旅之城 Monopoly Lite</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr" crossorigin="anonymous">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" v-cloak class="app-shell container-xxl py-4 py-lg-5">
+    <header class="hero-panel mb-4 mb-xl-5">
+      <div>
+        <p class="eyebrow mb-2">Vue Global Build + Bootstrap 5</p>
+        <h1 class="display-5 mb-3">富旅之城 Monopoly Lite</h1>
+        <p class="hero-copy mb-0">
+          這是一個免建置工具的單頁大富翁範例。設定 2 到 4 名玩家後，輪流擲骰、買地、收租，直到只剩最後一位沒有破產的玩家。
+        </p>
+      </div>
+      <div class="hero-stat-grid">
+        <div class="hero-stat-card">
+          <span>技術架構</span>
+          <strong>HTML / Vue / Bootstrap</strong>
+        </div>
+        <div class="hero-stat-card">
+          <span>遊戲模式</span>
+          <strong>本機輪流</strong>
+        </div>
+        <div class="hero-stat-card">
+          <span>勝利條件</span>
+          <strong>最後生存者</strong>
+        </div>
+      </div>
+    </header>
+
+    <div class="row g-4 align-items-start">
+      <section class="col-xl-8">
+        <div class="board-frame">
+          <div class="board-grid">
+            <article
+              v-for="(space, index) in board"
+              :key="space.id"
+              class="board-tile"
+              :class="[
+                tilePlacementClasses[index],
+                `tile-${space.type}`,
+                {
+                  'is-active-space': currentPlayer && currentPlayer.position === index && !winner,
+                  'is-owned-space': !!space.ownerId,
+                  'is-upgraded-space': isProperty(space) && space.level > 0,
+                }
+              ]"
+              :style="{ '--tile-accent': space.accent || '#d9d9d9' }"
+            >
+              <div class="tile-ribbon"></div>
+              <div class="tile-header">
+                <span class="tile-kind">{{ tileTypeLabel(space.type) }}</span>
+                <div class="tile-badges">
+                  <span v-if="isProperty(space)" class="level-chip">{{ propertyLevelBadge(space) }}</span>
+                  <span v-if="ownerFor(space)" class="owner-chip">{{ ownerFor(space).name }}</span>
+                </div>
+              </div>
+              <h2 class="tile-name">{{ space.name }}</h2>
+              <p v-if="space.type === 'property'" class="tile-meta">
+                {{ space.district }} / 租金 {{ formatCurrency(currentRent(space)) }}
+              </p>
+              <p v-if="space.type === 'property'" class="tile-meta">
+                售價 {{ formatCurrency(space.price) }}
+                <span v-if="!isPropertyMaxed(space)"> / 下級 {{ formatCurrency(nextUpgradeCost(space)) }}</span>
+                <span v-else> / 已滿級</span>
+              </p>
+              <p v-else-if="space.type === 'tax'" class="tile-meta">
+                支付 {{ formatCurrency(space.amount) }}
+              </p>
+              <p v-else class="tile-meta">{{ space.description }}</p>
+              <div v-if="playersOnSpace(index).length" class="tile-tokens">
+                <span
+                  v-for="player in playersOnSpace(index)"
+                  :key="player.id"
+                  class="player-token"
+                  :style="{ '--token-color': player.color }"
+                  :title="player.name"
+                >
+                  {{ player.shortName }}
+                </span>
+              </div>
+            </article>
+
+            <div class="board-center">
+              <p class="eyebrow mb-2">Board Control</p>
+              <h2 class="mb-3">{{ boardHeadline }}</h2>
+              <p class="board-center-copy mb-4">{{ boardSubline }}</p>
+
+              <div class="center-stat-grid">
+                <div class="center-stat-card">
+                  <span>起點薪資</span>
+                  <strong>{{ formatCurrency(startReward) }}</strong>
+                </div>
+                <div class="center-stat-card">
+                  <span>開局資金</span>
+                  <strong>{{ formatCurrency(startingBalance) }}</strong>
+                </div>
+                <div class="center-stat-card">
+                  <span>場上玩家</span>
+                  <strong>{{ activePlayers.length }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="col-xl-4">
+        <div class="hud-stack">
+          <section class="hud-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow mb-2">Session Setup</p>
+                <h2 class="h4 mb-1">建立遊戲</h2>
+              </div>
+              <span class="status-pill">{{ gameStarted ? '遊戲進行中' : '等待開始' }}</span>
+            </div>
+
+            <form @submit.prevent="startGame" class="setup-form mt-4">
+              <div class="mb-3">
+                <label for="playerCount" class="form-label">玩家人數</label>
+                <select id="playerCount" v-model.number="playerCount" class="form-select">
+                  <option :value="2">2 位玩家</option>
+                  <option :value="3">3 位玩家</option>
+                  <option :value="4">4 位玩家</option>
+                </select>
+              </div>
+
+              <div class="row g-3">
+                <div v-for="slot in playerCount" :key="slot" class="col-12">
+                  <label :for="`player-${slot}`" class="form-label">玩家 {{ slot }} 名稱</label>
+                  <input
+                    :id="`player-${slot}`"
+                    v-model.trim="setupNames[slot - 1]"
+                    type="text"
+                    class="form-control"
+                    maxlength="12"
+                    :placeholder="`玩家 ${slot}`"
+                  >
+                </div>
+              </div>
+
+              <div v-if="formError" class="alert alert-danger mt-3 mb-0" role="alert">
+                {{ formError }}
+              </div>
+
+              <div class="d-flex gap-2 mt-4 flex-wrap">
+                <button type="submit" class="btn btn-ember">
+                  {{ gameStarted ? '依目前設定重新開局' : '開始遊戲' }}
+                </button>
+                <button v-if="gameStarted" type="button" class="btn btn-outline-dark" @click="resetGame">
+                  結束本局
+                </button>
+              </div>
+
+              <div class="save-tools mt-4">
+                <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                  <strong>進度管理</strong>
+                  <span class="mini-pill" v-if="hasAutoSave">最近暫存 {{ autoSaveMeta.savedAtText }}</span>
+                </div>
+
+                <div class="d-flex gap-2 mt-3 flex-wrap">
+                  <button type="button" class="btn btn-outline-dark" @click="exportSaveFile" :disabled="!gameStarted">匯出 JSON</button>
+                  <button type="button" class="btn btn-outline-dark" @click="triggerImportPicker">匯入 JSON</button>
+                  <button type="button" class="btn btn-outline-dark" @click="prepareAutoSaveImport" :disabled="!hasAutoSave">載入自動暫存</button>
+                  <button type="button" class="btn btn-outline-dark" @click="clearAutoSave" :disabled="!hasAutoSave">清除暫存</button>
+                </div>
+
+                <input id="saveFileInput" name="saveFileInput" ref="saveFileInput" class="d-none" type="file" accept=".json,application/json" aria-label="選擇 JSON 存檔" @change="handleImportFileChange">
+
+                <p class="save-meta mb-0 mt-3" v-if="hasAutoSave">
+                  {{ autoSaveMeta.playerText }} / {{ autoSaveMeta.stateText }}
+                </p>
+                <p class="save-meta mb-0 mt-3" v-else>
+                  目前沒有可用的自動暫存。匯入 JSON 或開始遊戲後，系統會自動保存最新進度。
+                </p>
+
+                <div v-if="pendingImport" class="import-preview-card mt-3">
+                  <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                    <strong>{{ pendingImport.sourceLabel }}待載入</strong>
+                    <span class="mini-pill">{{ pendingImport.summary.savedAtText }}</span>
+                  </div>
+                  <p class="save-meta mb-0 mt-2" v-if="pendingImport.fileName">檔案：{{ pendingImport.fileName }}</p>
+                  <p class="save-meta mb-0 mt-2">玩家：{{ pendingImport.summary.playerText }}</p>
+                  <p class="save-meta mb-0 mt-2">狀態：{{ pendingImport.summary.stateText }}</p>
+                  <p class="import-warning mb-0 mt-3">載入後會覆蓋目前畫面中的遊戲進度，以及瀏覽器中的 localStorage 自動暫存。</p>
+                  <div class="d-flex gap-2 mt-3 flex-wrap">
+                    <button type="button" class="btn btn-ember" @click="confirmPendingImport">確認覆蓋並載入</button>
+                    <button type="button" class="btn btn-outline-dark" @click="cancelPendingImport">取消</button>
+                  </div>
+                </div>
+
+                <div v-if="saveFeedback.text" class="alert mt-3 mb-0" :class="saveFeedbackClass()" role="alert">
+                  {{ saveFeedback.text }}
+                </div>
+              </div>
+            </form>
+          </section>
+
+          <section class="hud-card" v-if="gameStarted">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow mb-2">Current Turn</p>
+                <h2 class="h4 mb-1">{{ winner ? '本局結束' : `${currentPlayer.name} 的回合` }}</h2>
+              </div>
+              <span class="status-pill status-pill-accent">
+                {{ winner ? `贏家：${winner.name}` : currentSpace.name }}
+              </span>
+            </div>
+
+            <div class="current-player-panel mt-4">
+              <div class="current-player-header">
+                <span class="player-dot" :style="{ '--token-color': winner ? winner.color : currentPlayer.color }"></span>
+                <div>
+                  <strong>{{ winner ? winner.name : currentPlayer.name }}</strong>
+                  <p class="mb-0 text-secondary">
+                    {{ winner ? '已奪下整座城市。' : `現金 ${formatCurrency(currentPlayer.money)}，位置 ${currentSpace.name}` }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="roll-panel mt-3" v-if="currentRoll">
+                <span class="roll-chip">骰子 A {{ currentRoll.diceA }}</span>
+                <span class="roll-chip">骰子 B {{ currentRoll.diceB }}</span>
+                <span class="roll-chip roll-chip-strong">合計 {{ currentRoll.total }}</span>
+              </div>
+
+              <div class="action-grid mt-4">
+                <button class="btn btn-ember" @click="rollDice" :disabled="!canRoll">擲骰子</button>
+                <button class="btn btn-outline-dark" @click="buyCurrentProperty" :disabled="!canBuyCurrentProperty">購買地產</button>
+                <button class="btn btn-outline-dark" @click="skipPurchase" :disabled="!canSkipPurchase">略過購買</button>
+                <button class="btn btn-night" @click="endTurn" :disabled="!canEndTurn">結束回合</button>
+              </div>
+
+              <div class="upgrade-panel mt-4">
+                <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                  <strong>房屋升級</strong>
+                  <span class="mini-pill">可升級 {{ upgradeablePropertyCount(currentPlayer.id) }} 筆</span>
+                </div>
+                <p class="upgrade-panel-copy mb-0 mt-2">
+                  你可以在自己的回合中投資名下地產，提升租金與地產價值。
+                </p>
+
+                <div v-if="currentPlayerProperties.length" class="upgrade-list mt-3">
+                  <article
+                    v-for="space in currentPlayerProperties"
+                    :key="space.id"
+                    class="upgrade-item"
+                    :class="{
+                      'is-upgradeable': isUpgradeAvailable(space),
+                      'is-maxed': isPropertyMaxed(space),
+                    }"
+                  >
+                    <div>
+                      <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <strong>{{ space.name }}</strong>
+                        <span class="mini-pill">{{ space.district }}</span>
+                        <span class="mini-pill mini-pill-accent">{{ propertyLevelBadge(space) }}</span>
+                      </div>
+                      <p class="upgrade-meta mb-0">{{ propertyUpgradeSummary(space) }}</p>
+                    </div>
+                    <button
+                      class="btn btn-sm btn-outline-dark"
+                      @click="upgradeProperty(space.id)"
+                      :disabled="!isUpgradeAvailable(space)"
+                    >
+                      {{ propertyUpgradeButtonLabel(space) }}
+                    </button>
+                  </article>
+                </div>
+
+                <p v-else class="empty-upgrade-state mb-0 mt-3">目前尚未擁有可升級地產。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="hud-card" v-if="gameStarted">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow mb-2">Chance Deck</p>
+                <h2 class="h4 mb-1">機會卡牌</h2>
+              </div>
+              <span class="status-pill">牌堆 {{ chanceDeckCount }} / 棄牌 {{ chanceDiscardCount }}</span>
+            </div>
+
+            <div class="chance-card-panel mt-4" :class="lastDrawnCard ? `tone-${lastDrawnCard.tone || 'turn'}` : ''">
+              <template v-if="lastDrawnCard">
+                <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                  <strong>{{ lastDrawnCard.title }}</strong>
+                  <span class="mini-pill">{{ chanceCardSummary(lastDrawnCard) }}</span>
+                </div>
+                <p class="chance-card-copy mb-2 mt-2">{{ lastDrawnCard.description }}</p>
+                <p class="chance-card-result mb-0">{{ lastDrawnCard.effectSummary }}</p>
+              </template>
+              <template v-else>
+                <strong>尚未抽到機會卡</strong>
+                <p class="chance-card-copy mb-0 mt-2">玩家踩到機會格後，這裡會顯示最近一張抽到的牌與效果摘要。</p>
+              </template>
+            </div>
+          </section>
+
+          <section class="hud-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow mb-2">Players</p>
+                <h2 class="h4 mb-1">資產面板</h2>
+              </div>
+              <span class="status-pill">{{ players.length || playerCount }} slots</span>
+            </div>
+
+            <div class="player-list mt-4">
+              <article
+                v-for="player in playerStandings"
+                :key="player.id"
+                class="player-row"
+                :class="{
+                  'is-current': currentPlayer && player.id === currentPlayer.id && !winner,
+                  'is-bankrupt': player.bankrupt,
+                }"
+              >
+                <div class="player-row-main">
+                  <span class="player-dot" :style="{ '--token-color': player.color }"></span>
+                  <div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                      <strong>{{ player.name }}</strong>
+                      <span class="mini-pill" v-if="player.bankrupt">已破產</span>
+                      <span class="mini-pill mini-pill-accent" v-else-if="winner && winner.id === player.id">勝利者</span>
+                    </div>
+                    <p class="mb-0 text-secondary">
+                      現金 {{ formatCurrency(player.money) }} / 地產 {{ propertyCount(player.id) }} 筆 / 可升級 {{ upgradeablePropertyCount(player.id) }} 筆
+                    </p>
+                  </div>
+                </div>
+                <p class="player-assets mb-0">{{ propertyNames(player.id) || '尚未擁有地產' }}</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="hud-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow mb-2">Event Feed</p>
+                <h2 class="h4 mb-1">事件紀錄</h2>
+              </div>
+              <span class="status-pill">{{ logEntries.length }} entries</span>
+            </div>
+
+            <ol class="log-list mt-4">
+              <li v-for="entry in logEntries" :key="entry.id" class="log-item" :class="`tone-${entry.tone}`">
+                {{ entry.message }}
+              </li>
+            </ol>
+          </section>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
